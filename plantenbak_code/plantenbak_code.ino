@@ -11,10 +11,13 @@ DallasTemperature sensor1(&oneWire1);
  
 // pH sensor op analoge pin A0
 #define PH_PIN A0
-// Kalibratie: pH = PH_SLOPE * spanning(V) + PH_OFFSET
-// Pas PH_OFFSET aan na calibratie met bufferoplossingen
-const float PH_SLOPE = 3.5;   // typische waarde voor veel hobby pH-kits
-const float PH_OFFSET = 0.0;  // offset aan te passen
+// Twee-punts kalibratie (aanpassen met jouw gemeten spanningen)
+// Meet de uitgangsspanning van de pH-kit in pH 7 en pH 4 buffer
+// en vul die waardes hieronder in (in Volt). Dit levert beste nauwkeurigheid.
+const float PH_CAL_PH1 = 7.00;        // referentie 1
+const float PH_CAL_V1  = 1.882;        // gemeten spanning bij pH 7 (V)
+const float PH_CAL_PH2 = 4.00;        // referentie 2
+const float PH_CAL_V2  = 1.982;        // gemeten spanning bij pH 4 (V) – typische default
 const float ADC_REF_VOLT = 5.0;   // referentiespanning van ADC (pas aan indien 3.3V board)
 const int   ADC_RESOLUTION = 1023; // 10-bit ADC van Arduino Uno/Nano
 const int   PH_SAMPLES = 10;       // aantal metingen middelen voor stabiliteit
@@ -28,7 +31,11 @@ void os_getArtEui(u1_t* buf) { }
 void os_getDevEui(u1_t* buf) { }
 void os_getDevKey(u1_t* buf) { }
  
-uint8_t mydata[5];  // 1 byte ID + 2 bytes temperatuur + 2 bytes pH
+// Payload: twee losse records van 3 bytes elk: [id][value_hi][value_lo]
+// Record 1 = temperatuur, Record 2 = pH (beide x100, int16)
+uint8_t mydata[6];
+const uint8_t TEMP_SENSOR_ID = 1;
+const uint8_t PH_SENSOR_ID = 2;
 static osjob_t sendjob;
 const unsigned TX_INTERVAL = 60;
  
@@ -55,7 +62,6 @@ void onEvent(ev_t ev) {
  
 void do_send(osjob_t* j) {
   sensor1.requestTemperatures();
-  delay(100);
   float temp = sensor1.getTempCByIndex(0);
   Serial.print("Sensor 1 temperatuur: ");
   Serial.println(temp);
@@ -73,7 +79,11 @@ void do_send(osjob_t* j) {
   }
   float phRaw = (float)phSum / PH_SAMPLES;
   float phVoltage = (phRaw / ADC_RESOLUTION) * ADC_REF_VOLT;
-  float ph = PH_SLOPE * phVoltage + PH_OFFSET;
+  // Bereken lineaire kalibratiecoëfficiënten op basis van twee punten
+  // pH = slope * V + offset
+  float phSlope  = (PH_CAL_PH2 - PH_CAL_PH1) / (PH_CAL_V2 - PH_CAL_V1);
+  float phOffset = PH_CAL_PH1 - phSlope * PH_CAL_V1;
+  float ph = phSlope * phVoltage + phOffset;
   Serial.print("pH spanning (V): ");
   Serial.println(phVoltage, 3);
   Serial.print("Berekenede pH: ");
@@ -81,23 +91,28 @@ void do_send(osjob_t* j) {
 
   int16_t tempVal = round(temp * 100);
   int16_t phVal = round(ph * 100);
-  mydata[0] = 1; // Sensor-ID
+  // Record 1: temperatuur
+  mydata[0] = TEMP_SENSOR_ID;
   mydata[1] = highByte(tempVal);
   mydata[2] = lowByte(tempVal);
-  mydata[3] = highByte(phVal);
-  mydata[4] = lowByte(phVal);
+  // Record 2: pH
+  mydata[3] = PH_SENSOR_ID;
+  mydata[4] = highByte(phVal);
+  mydata[5] = lowByte(phVal);
   Serial.println(tempVal);
  
-//   Serial.print("Payload: ID=");
+//   Serial.print("Payload bytes: ");
   Serial.print(mydata[0]);
-//   Serial.print(", Temp bytes=");
+  Serial.print(" ");
   Serial.print(mydata[1]);
   Serial.print(" ");
   Serial.print(mydata[2]);
   Serial.print(" ");
   Serial.print(mydata[3]);
   Serial.print(" ");
-  Serial.println(mydata[4]);
+  Serial.print(mydata[4]);
+  Serial.print(" ");
+  Serial.println(mydata[5]);
  
   if (LMIC.opmode & OP_TXRXPEND) {
     Serial.println(F("OP_TXRXPEND, not sending"));
@@ -112,6 +127,9 @@ void setup() {
   Serial.println(F("Opstarten met 1 sensor..."));
  
   sensor1.begin();
+  // Max resolutie en blokkerende conversie voor 0.0625°C stappen
+  sensor1.setResolution(12);
+  sensor1.setWaitForConversion(true);
  
   os_init();
   LMIC_reset();
