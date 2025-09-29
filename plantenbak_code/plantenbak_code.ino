@@ -9,6 +9,16 @@
 OneWire oneWire1(SENSOR1_PIN);
 DallasTemperature sensor1(&oneWire1);
  
+// pH sensor op analoge pin A0
+#define PH_PIN A0
+// Kalibratie: pH = PH_SLOPE * spanning(V) + PH_OFFSET
+// Pas PH_OFFSET aan na calibratie met bufferoplossingen
+const float PH_SLOPE = 3.5;   // typische waarde voor veel hobby pH-kits
+const float PH_OFFSET = 0.0;  // offset aan te passen
+const float ADC_REF_VOLT = 5.0;   // referentiespanning van ADC (pas aan indien 3.3V board)
+const int   ADC_RESOLUTION = 1023; // 10-bit ADC van Arduino Uno/Nano
+const int   PH_SAMPLES = 10;       // aantal metingen middelen voor stabiliteit
+ 
 // LoRaWAN ABP-sleutels
 static const PROGMEM u1_t NWKSKEY[16] = { 0xF0, 0xE8, 0x88, 0xE6, 0xF9, 0xAD, 0x52, 0xEE, 0x98, 0x40, 0xFF, 0xBA, 0xC8, 0xD2, 0x81, 0x5D };
 static const PROGMEM u1_t APPSKEY[16] = { 0xE3, 0xD0, 0xA3, 0xEA, 0x86, 0x14, 0xD5, 0x3C, 0x2B, 0x21, 0xDF, 0x9E, 0x89, 0x8A, 0xFE, 0x78 };
@@ -18,7 +28,7 @@ void os_getArtEui(u1_t* buf) { }
 void os_getDevEui(u1_t* buf) { }
 void os_getDevKey(u1_t* buf) { }
  
-uint8_t mydata[3];  // 1 byte ID + 2 bytes temperatuur
+uint8_t mydata[5];  // 1 byte ID + 2 bytes temperatuur + 2 bytes pH
 static osjob_t sendjob;
 const unsigned TX_INTERVAL = 60;
  
@@ -55,10 +65,27 @@ void do_send(osjob_t* j) {
     return;
   }
  
+  // Lees en bereken pH
+  long phSum = 0;
+  for (int i = 0; i < PH_SAMPLES; i++) {
+    phSum += analogRead(PH_PIN);
+    delay(10);
+  }
+  float phRaw = (float)phSum / PH_SAMPLES;
+  float phVoltage = (phRaw / ADC_RESOLUTION) * ADC_REF_VOLT;
+  float ph = PH_SLOPE * phVoltage + PH_OFFSET;
+  Serial.print("pH spanning (V): ");
+  Serial.println(phVoltage, 3);
+  Serial.print("Berekenede pH: ");
+  Serial.println(ph, 2);
+
   int16_t tempVal = round(temp * 100);
+  int16_t phVal = round(ph * 100);
   mydata[0] = 1; // Sensor-ID
   mydata[1] = highByte(tempVal);
   mydata[2] = lowByte(tempVal);
+  mydata[3] = highByte(phVal);
+  mydata[4] = lowByte(phVal);
   Serial.println(tempVal);
  
 //   Serial.print("Payload: ID=");
@@ -66,7 +93,11 @@ void do_send(osjob_t* j) {
 //   Serial.print(", Temp bytes=");
   Serial.print(mydata[1]);
   Serial.print(" ");
-  Serial.println(mydata[2]);
+  Serial.print(mydata[2]);
+  Serial.print(" ");
+  Serial.print(mydata[3]);
+  Serial.print(" ");
+  Serial.println(mydata[4]);
  
   if (LMIC.opmode & OP_TXRXPEND) {
     Serial.println(F("OP_TXRXPEND, not sending"));
