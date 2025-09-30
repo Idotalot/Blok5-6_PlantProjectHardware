@@ -3,24 +3,19 @@
 #include <SPI.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include "sensors/TemperatureSensor.h"
+#include "sensors/PhSensor.h"
  
 // DS18B20 op eigen pin
 #define SENSOR1_PIN 5
-OneWire oneWire1(SENSOR1_PIN);
-DallasTemperature sensor1(&oneWire1);
+TemperatureSensor tempSensor(SENSOR1_PIN);
  
 // pH sensor op analoge pin A0
 #define PH_PIN A0
-// Twee-punts kalibratie (aanpassen met jouw gemeten spanningen)
-// Meet de uitgangsspanning van de pH-kit in pH 7 en pH 4 buffer
-// en vul die waardes hieronder in (in Volt). Dit levert beste nauwkeurigheid.
-const float PH_CAL_PH1 = 7.00;        // referentie 1
-const float PH_CAL_V1  = 1.882;        // gemeten spanning bij pH 7 (V)
-const float PH_CAL_PH2 = 4.00;        // referentie 2
-const float PH_CAL_V2  = 1.982;        // gemeten spanning bij pH 4 (V) – typische default
 const float ADC_REF_VOLT = 5.0;   // referentiespanning van ADC (pas aan indien 3.3V board)
 const int   ADC_RESOLUTION = 1023; // 10-bit ADC van Arduino Uno/Nano
 const int   PH_SAMPLES = 10;       // aantal metingen middelen voor stabiliteit
+PhSensor phSensor(PH_PIN, ADC_REF_VOLT, ADC_RESOLUTION, PH_SAMPLES);
  
 // LoRaWAN ABP-sleutels
 static const PROGMEM u1_t NWKSKEY[16] = { 0xF0, 0xE8, 0x88, 0xE6, 0xF9, 0xAD, 0x52, 0xEE, 0x98, 0x40, 0xFF, 0xBA, 0xC8, 0xD2, 0x81, 0x5D };
@@ -61,8 +56,7 @@ void onEvent(ev_t ev) {
 }
  
 void do_send(osjob_t* j) {
-  sensor1.requestTemperatures();
-  float temp = sensor1.getTempCByIndex(0);
+  float temp = tempSensor.readCelsius();
   Serial.print("Sensor 1 temperatuur: ");
   Serial.println(temp);
  
@@ -72,18 +66,8 @@ void do_send(osjob_t* j) {
   }
  
   // Lees en bereken pH
-  long phSum = 0;
-  for (int i = 0; i < PH_SAMPLES; i++) {
-    phSum += analogRead(PH_PIN);
-    delay(10);
-  }
-  float phRaw = (float)phSum / PH_SAMPLES;
-  float phVoltage = (phRaw / ADC_RESOLUTION) * ADC_REF_VOLT;
-  // Bereken lineaire kalibratiecoëfficiënten op basis van twee punten
-  // pH = slope * V + offset
-  float phSlope  = (PH_CAL_PH2 - PH_CAL_PH1) / (PH_CAL_V2 - PH_CAL_V1);
-  float phOffset = PH_CAL_PH1 - phSlope * PH_CAL_V1;
-  float ph = phSlope * phVoltage + phOffset;
+  float phVoltage = phSensor.readVoltage();
+  float ph = phSensor.readPh();
   Serial.print("pH spanning (V): ");
   Serial.println(phVoltage, 3);
   Serial.print("Berekenede pH: ");
@@ -126,10 +110,11 @@ void setup() {
   Serial.begin(115200);
   Serial.println(F("Opstarten met 1 sensor..."));
  
-  sensor1.begin();
-  // Max resolutie en blokkerende conversie voor 0.0625°C stappen
-  sensor1.setResolution(12);
-  sensor1.setWaitForConversion(true);
+  tempSensor.begin();
+  tempSensor.setResolution(12);
+  tempSensor.setWaitForConversion(true);
+  // Stel pH kalibratiepunten in (pas aan naar jouw gemeten spanningen)
+  phSensor.setCalibration(7.00, 1.882, 4.00, 1.982);
  
   os_init();
   LMIC_reset();
