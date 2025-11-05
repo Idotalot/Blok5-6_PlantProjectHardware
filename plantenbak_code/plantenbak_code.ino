@@ -6,6 +6,12 @@
 #include "sensors/PhSensor.h"
 #include <DallasTemperature.h>
 
+// ------------------ LED Control ------------------
+#define LED_PIN 8
+const unsigned long LED_ON_DURATION_MS = 5000UL;
+bool ledTimerActive = false;
+unsigned long ledOffDeadlineMs = 0;
+
 // ------------------ DS18B20 Temperature ------------------
 #define SENSOR1_PIN 5
 TemperatureSensor tempSensor(SENSOR1_PIN);
@@ -110,6 +116,34 @@ void onEvent(ev_t ev) {
     switch (ev) {
         case EV_TXCOMPLETE:
             Serial.println(F("EV_TXCOMPLETE"));
+            // Handle downlink
+            if (LMIC.dataLen > 0) {
+                Serial.print(F("Downlink ("));
+                Serial.print(LMIC.dataLen);
+                Serial.println(F(") bytes:"));
+                for (uint8_t i = 0; i < LMIC.dataLen; i++) {
+                    uint8_t b = LMIC.frame[LMIC.dataBeg + i];
+                    if (b < 0x10) Serial.print('0');
+                    Serial.print(b, HEX);
+                    Serial.print(' ');
+                }
+                Serial.println();
+
+                // Simple protocol: first byte 0x01 = ON, 0x00 = OFF
+                uint8_t cmd = LMIC.frame[LMIC.dataBeg + 0];
+                if (cmd == 0x01) {
+                    digitalWrite(LED_PIN, HIGH);
+                    Serial.println(F("LED -> ON"));
+                    ledTimerActive = true;
+                    ledOffDeadlineMs = millis() + LED_ON_DURATION_MS;
+                } else if (cmd == 0x00) {
+                    digitalWrite(LED_PIN, LOW);
+                    Serial.println(F("LED -> OFF"));
+                    ledTimerActive = false;
+                } else {
+                    Serial.println(F("Unknown downlink command"));
+                }
+            }
             os_setTimedCallback(&sendjob, os_getTime() + sec2osticks(TX_INTERVAL), do_send);
             break;
         default:
@@ -174,6 +208,10 @@ void setup() {
  
   Wire.begin();
   
+  // Initialize LED pin
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+  
   tempSensor.begin();
   tempSensor.setResolution(12);
   tempSensor.setWaitForConversion(true);
@@ -217,4 +255,12 @@ void setup() {
 // ------------------ Loop ------------------
 void loop() {
     os_runloop_once();
+    if (ledTimerActive) {
+        // Handle rollover-safe timeout check
+        if ((long)(millis() - ledOffDeadlineMs) >= 0) {
+            digitalWrite(LED_PIN, LOW);
+            ledTimerActive = false;
+            Serial.println(F("LED -> auto OFF (timer)"));
+        }
+    }
 }
