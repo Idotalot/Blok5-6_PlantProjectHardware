@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include "sensors/TemperatureSensor.h"
 #include "sensors/PhSensor.h"
+#include "sensors/WaterLevelSensor.h"
 #include <DallasTemperature.h>
 
 // ------------------ LED Control ------------------
@@ -27,8 +28,7 @@ PhSensor phSensor(PH_PIN, ADC_REF_VOLT, ADC_RESOLUTION, PH_SAMPLES);
 #define ATTINY1_HIGH_ADDR   0x78
 #define ATTINY2_LOW_ADDR    0x77
 #define THRESHOLD           100    // adjust as needed
-uint8_t low_data_watersensor[8] = {0};
-uint8_t high_data_watersensor[12] = {0};
+WaterLevelSensor waterSensor(ATTINY1_HIGH_ADDR, ATTINY2_LOW_ADDR, THRESHOLD);
 
 // ------------------ LoRaWAN ------------------
 static const PROGMEM u1_t NWKSKEY[16] = { 0xF0,0xE8,0x88,0xE6,0xF9,0xAD,0x52,0xEE,0x98,0x40,0xFF,0xBA,0xC8,0xD2,0x81,0x5D };
@@ -55,58 +55,17 @@ const lmic_pinmap lmic_pins = {
 };
 
 // ------------------ Water Sensor Functions ------------------
-bool getHigh12SectionValue() {
-    memset(high_data_watersensor, 0, sizeof(high_data_watersensor));
-    Wire.requestFrom(ATTINY1_HIGH_ADDR, 12);
-    unsigned long start = millis();
-    while (Wire.available() < 12) {
-        if (millis() - start > 100) {
-            Serial.println(F("⚠️ No response from high section (0x78)"));
-            return false;
-        }
-    }
-    for (int i = 0; i < 12; i++) high_data_watersensor[i] = Wire.read();
-    // Wait 10ms using millis() instead of delay()
-    unsigned long waitStart = millis();
-    while (millis() - waitStart < 10) {
-        // Non-blocking wait
-    }
-    return true;
-}
-
-bool getLow8SectionValue() {
-    memset(low_data_watersensor, 0, sizeof(low_data_watersensor));
-    Wire.requestFrom(ATTINY2_LOW_ADDR, 8);
-    unsigned long start = millis();
-    while (Wire.available() < 8) {
-        if (millis() - start > 100) {
-            Serial.println(F("⚠️ No response from low section (0x77)"));
-            return false;
-        }
-    }
-    for (int i = 0; i < 8; i++) low_data_watersensor[i] = Wire.read();
-    // Wait 10ms using millis() instead of delay()
-    unsigned long waitStart = millis();
-    while (millis() - waitStart < 10) {
-        // Non-blocking wait
-    }
-    return true;
-}
-
 uint16_t readWaterLevel_mm() {
-    if (!getLow8SectionValue() || !getHigh12SectionValue()) {
-        Serial.println(F("⚠️ Water level sensor read failed"));
+    uint8_t wet_sections = waterSensor.readWetSectionCount();
+    if (wet_sections == 0) {
+        // Could be 0 legitimately; still print sections for visibility
+        Serial.print(F("Wet sections: "));
+        Serial.println(wet_sections);
         return 0;
     }
-
-    uint8_t wet_sections = 0;
-    for (int i = 0; i < 8; i++) if (low_data_watersensor[i] > THRESHOLD) wet_sections++;
-    for (int i = 0; i < 12; i++) if (high_data_watersensor[i] > THRESHOLD) wet_sections++;
-
     Serial.print(F("Wet sections: "));
     Serial.println(wet_sections);
-
-    return wet_sections * 5; // 5 mm per section
+    return static_cast<uint16_t>(wet_sections) * 5;
 }
 
 // ------------------ LoRa Event ------------------
