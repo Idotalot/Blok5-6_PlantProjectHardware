@@ -36,7 +36,7 @@ public:
 private:
   bool readHigh12() {
     memset(highData, 0, sizeof(highData));
-    Wire.requestFrom(highAddr, 12);
+    Wire.requestFrom((uint8_t)highAddr, (uint8_t)12);
     unsigned long start = millis();
     while (Wire.available() < 12) {
       if (millis() - start > 100) {
@@ -52,7 +52,7 @@ private:
 
   bool readLow8() {
     memset(lowData, 0, sizeof(lowData));
-    Wire.requestFrom(lowAddr, 8);
+    Wire.requestFrom((uint8_t)lowAddr, (uint8_t)8);
     unsigned long start = millis();
     while (Wire.available() < 8) {
       if (millis() - start > 100) {

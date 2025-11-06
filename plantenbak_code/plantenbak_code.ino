@@ -45,7 +45,7 @@ const uint8_t TEMP_SENSOR_ID  = 1;
 const uint8_t PH_SENSOR_ID    = 2;
 const uint8_t WATER_SENSOR_ID = 3;
 static osjob_t sendjob; 
-const unsigned TX_INTERVAL = 60;
+const unsigned TX_INTERVAL = 20;
 
 const lmic_pinmap lmic_pins = {
     .nss = 10,
